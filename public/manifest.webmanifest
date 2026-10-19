@@ -1,0 +1,17 @@
+{
+  "name": "liteDisplay 藍圖工作台",
+  "short_name": "liteDisplay",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111817",
+  "theme_color": "#111817",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

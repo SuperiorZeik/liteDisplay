@@ -1,0 +1,69 @@
+# liteDisplay
+
+純靜態的 Minecraft 藍圖工作台。檔案在瀏覽器的 Web Worker 中解壓縮、讀取 NBT 並解包方塊資料，不會傳送到伺服器。顯示資源已隨網站打包，執行時不依賴第三方 API。
+
+## 開發與建置
+
+需要 Node.js 22.12 以上或 Node.js 24。
+
+```powershell
+npm ci
+npm run dev
+```
+
+開啟終端顯示的本機網址。預設為 `http://127.0.0.1:5173/`。
+
+```powershell
+npm test
+npm run build
+npm run preview
+```
+
+`dist/` 是完整的靜態網站，可放到 GitHub Pages、Cloudflare Pages 或其他 HTTPS 靜態空間。支援子路徑部署；不需要 Node.js 伺服器、資料庫或 API 金鑰。直接以 `file://` 開啟不支援 Worker 與離線快取，請用 HTTP 預覽。
+
+## 已實作
+
+- `.litematic` v1–v7、誤命名的 `.litematica`、Sponge `.schem` v2/v3、原版 `.nbt`，以及本站 ZIP 檢視包。
+- gzip／未壓縮 NBT、原生 BigInt long array、跨 64 位元邊界的緊密位元解包、負尺寸與多區域座標。
+- Minecraft 1.21.1 的模型與像素材質、軌道操作、固定視角、透視／正交、網格、區域邊界、線框與低畫質模式。
+- X／Y／Z 單層與累積剖面、區域隱藏與聚焦。
+- 方塊點選、座標、完整 block state，以及可定位的方塊實體 NBT。
+- 材料搜尋、排序、目前剖面統計、高亮、單一材料隔離與定位。
+- 材料 CSV、1×／2× PNG、透明背景、名稱與尺寸標示、原始檔下載。
+- 本機圖庫（IndexedDB）、縮圖、標籤搜尋、Y 層／區域建造進度（localStorage）。
+- 同座標雙檔比較：新增、移除、狀態變更；完整狀態參與比較。
+- 原始藍圖＋相機／檢視設定的 ZIP；分享視角網址以 SHA-256 綁定原始檔案。
+- 本機 Java 資源包 ZIP 匯入，覆寫模型與貼圖。資源包僅存在目前分頁。
+- 手機抽屜面板、觸控操作、鍵盤快捷鍵、對話框焦點循環。
+- 正式建置產生有版本識別的 Service Worker，預先快取完整網站與顯示資源；完成快取後可離線重開。
+
+## 資料與效能界線
+
+- 檔案上限 64 MB、NBT 解壓縮上限 256 MB、總區域體積上限 800 萬格。
+- 可見方塊上限 50 萬；超過時可用剖面與區域隱藏縮小範圍。
+- 雙檔比較合計最多 100 萬個非空氣方塊，依藍圖座標原點對齊。
+- 區域重疊時材料數依區域累加。材料清單是方塊統計；組與盒以每組 64 格換算，沒有完整的建造物品轉換（例如床、門、雙半磚）。
+- 顯示資源固定為 1.21.1，不執行 Minecraft DataFixer。未知／模組方塊，以及無法以靜態方塊模型呈現的種類，使用可選取的替代方塊並列出名稱。
+- 方塊實體的特殊外觀（例如箱子）、動態流體、材質動畫、實體渲染與紅石運作模擬尚未支援。材質動畫顯示第一幀；部分 UV lock、光照與透明排序可能與遊戲不同。
+- 保留並可下載原始檔，不會重新序列化或降版使用者的藍圖。
+- 清除網站資料會移除本機圖庫與建造進度。視角 ZIP 保存藍圖與檢視設定，不含本機進度及自訂資源包。
+
+## 原始碼
+
+| 路徑                        | 用途                                      |
+| --------------------------- | ----------------------------------------- |
+| `src/core/nbt.ts`           | 帶型別的 NBT、gzip、BigInt 讀寫與大小限制 |
+| `src/core/parser.ts`        | 格式轉換、調色盤、座標與 bit packing      |
+| `src/core/parse.worker.ts`  | 裝置端背景解析與進度                      |
+| `src/core/demo.ts`          | 可下載的真實格式示範藍圖                  |
+| `src/render/resources.ts`   | Deepslate 模型、材質圖集、資源包          |
+| `src/render/scene.ts`       | Three.js instancing、視角、選取與差異渲染 |
+| `src/core/storage.ts`       | IndexedDB、檔案雜湊與本機下載             |
+| `src/App.tsx`               | 工作台與功能連動                          |
+| `scripts/build-offline.mjs` | 離線快取與第三方授權資訊                  |
+
+`npm test` 包含 9 個不需網路的核心測試；另外 4 個真實檔案測試在 `test-results/fixtures/` 有對應檔案時執行，否則會明確標記略過。
+
+真實整合樣本來源：[RubixDev/rustmatica/test_files](https://github.com/RubixDev/rustmatica/tree/main/test_files)，使用 `donut.litematic`、`donut_modified.litematic`、`axolotl.litematic`。這些檔案僅位於忽略的測試目錄，不會發布到網站。
+
+Minecraft 顯示資源來自 [misode/mcmeta](https://github.com/misode/mcmeta) 的固定 1.21.1 標籤。`npm run assets` 可重建本機靜態資源，需要網路。材質與遊戲資源屬 Mojang Studios／Microsoft；本站非官方產品。相依軟體授權會一併輸出到 `dist/third-party-notices.txt`。

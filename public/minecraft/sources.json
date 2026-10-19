@@ -1,0 +1,12 @@
+{
+  "version": "1.21.1",
+  "source": "https://github.com/misode/mcmeta",
+  "files": {
+    "blockstates.json": "1.21.1-summary/assets/block_definition/data.min.json",
+    "models.json": "1.21.1-summary/assets/model/data.min.json",
+    "atlas.json": "1.21.1-atlas/blocks/data.min.json",
+    "atlas.png": "1.21.1-atlas/blocks/atlas.png",
+    "zh_tw.json": "1.21.1-assets/assets/minecraft/lang/zh_tw.json"
+  },
+  "attribution": "Minecraft assets © Mojang Studios. Not an official Minecraft product."
+}
