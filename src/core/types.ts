@@ -46,6 +46,7 @@ export interface PickedBlock {
   position: Vec3;
   local: Vec3;
   state: BlockState;
+  blockEntity?: Compound;
 }
 export type LayerMode = "all" | "single" | "below";
 export interface ViewSettings {
@@ -94,9 +95,7 @@ export function blockAt(r: Region, x: number, y: number, z: number) {
     return undefined;
   return r.palette[r.blocks[(y * r.size[2] + z) * r.size[0] + x]];
 }
-export function* eachBlock(
-  r: Region,
-): Generator<{
+export function* eachBlock(r: Region): Generator<{
   position: Vec3;
   local: Vec3;
   state: BlockState;

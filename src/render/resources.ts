@@ -7,7 +7,9 @@ import {
 } from "deepslate/render";
 import { Identifier } from "deepslate/core";
 import { unzipSync } from "fflate";
-import { stateKey, type BlockState } from "../core/types";
+import { type BlockState, type Compound } from "../core/types";
+import { appearanceKey } from "../core/block-entities";
+import { meshGeometry, specialBlockMesh } from "./block-entities";
 import translations from "../data/block-labels.json";
 
 export const labels: Record<string, string> = translations;
@@ -67,11 +69,50 @@ export class Resources {
     const img = this.texture.image as HTMLImageElement;
     const canvas = document.createElement("canvas");
     canvas.width = img.width;
-    canvas.height = img.height;
+    canvas.height = img.height + 64;
     canvas.getContext("2d")!.drawImage(img, 0, 0);
+    // Deep texture paths are omitted upstream: supply skins and hanging signs locally.
+    const extras = [
+      ["entity/player/wide/steve", "steve.png"],
+      ...[
+        "oak",
+        "spruce",
+        "birch",
+        "jungle",
+        "acacia",
+        "dark_oak",
+        "mangrove",
+        "cherry",
+        "bamboo",
+        "crimson",
+        "warped",
+      ].map((wood) => [
+        `entity/signs/hanging/${wood}`,
+        `hanging-sign-${wood}.png`,
+      ]),
+    ];
+    const extraUV: Record<string, number[]> = {};
+    await Promise.all(
+      extras.map(async ([key, file], i) => {
+        const skin = await new THREE.TextureLoader().loadAsync(base + file);
+        const x = i * 64,
+          width = skin.image.width,
+          height = skin.image.height;
+        canvas.getContext("2d")!.drawImage(skin.image, x, img.height);
+        extraUV[key] = [
+          x / img.width,
+          img.height / canvas.height,
+          (x + width) / img.width,
+          (img.height + height) / canvas.height,
+        ];
+        skin.dispose();
+      }),
+    );
     this.pixelData = canvas
       .getContext("2d")!
-      .getImageData(0, 0, img.width, img.height);
+      .getImageData(0, 0, canvas.width, canvas.height);
+    this.texture.dispose();
+    this.texture = new THREE.CanvasTexture(canvas);
     this.atlasSize = img.width;
     this.uv = Object.fromEntries(
       Object.entries(atlas as Record<string, number[]>).map(
@@ -79,13 +120,15 @@ export class Resources {
           key,
           [
             x / img.width,
-            y / img.height,
+            y / canvas.height,
             (x + w) / img.width,
-            (y + Math.min(w, h)) / img.height,
+            (y + (key.startsWith("entity/") ? h : Math.min(w, h))) /
+              canvas.height,
           ],
         ],
       ),
     );
+    Object.assign(this.uv, extraUV);
     this.configureTexture();
     this.buildModels();
   }
@@ -115,8 +158,8 @@ export class Resources {
     this.geometries.clear();
     this.missing.clear();
   }
-  geometry(state: BlockState): THREE.BufferGeometry {
-    const key = stateKey(state);
+  geometry(state: BlockState, blockEntity?: Compound): THREE.BufferGeometry {
+    const key = appearanceKey(state, blockEntity);
     if (this.geometries.has(key)) {
       const geometry = this.geometries.get(key)!;
       if (geometry.userData.fallback) this.missing.add(state.name);
@@ -124,52 +167,38 @@ export class Resources {
     }
     const definition = this.definitions.get(state.name);
     let geometry: THREE.BufferGeometry | undefined;
-    if (definition)
-      try {
-        const atlas: TextureAtlasProvider = {
-          getTextureAtlas: () => this.pixelData,
-          getTextureUV: (id: Identifier): UV => {
-            const uv = this.uv[id.path] ?? this.uv[id.toString()];
-            if (!uv) return [0, 0, 16 / this.atlasSize, 16 / this.atlasSize];
-            // mcmeta atlas uses normalized [u0,v0,u1,v1] coordinates.
-            return uv as UV;
-          },
-        };
-        const mesh = definition.getMesh(
-          Identifier.parse(state.name),
-          state.properties,
-          atlas,
-          {
-            getBlockModel: (id: Identifier) =>
-              this.models.get(id.toString()) ?? null,
-          },
-          {},
-        );
-        if (mesh.quads.length) {
-          const positions: number[] = [],
-            colors: number[] = [],
-            uvs: number[] = [];
-          for (const q of mesh.quads)
-            for (const v of [q.v1, q.v2, q.v3, q.v1, q.v3, q.v4]) {
-              positions.push(...v.pos.components());
-              colors.push(...v.color);
-              uvs.push(...(v.texture ?? [0, 0]));
-            }
-          geometry = new THREE.BufferGeometry();
-          geometry.setAttribute(
-            "position",
-            new THREE.Float32BufferAttribute(positions, 3),
-          );
-          geometry.setAttribute(
-            "color",
-            new THREE.Float32BufferAttribute(colors, 3),
-          );
-          geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-          geometry.computeVertexNormals();
-        }
-      } catch {
-        /* Unknown modded/unsupported models remain identifiable and selectable. */
-      }
+    try {
+      const atlas: TextureAtlasProvider = {
+        getTextureAtlas: () => this.pixelData,
+        getTextureUV: (id: Identifier): UV => {
+          const path =
+            id.path === "entity/banner/banner_base"
+              ? "entity/banner_base"
+              : id.path;
+          const uv = this.uv[id.toString()] ?? this.uv[path];
+          if (!uv) throw new Error(`Missing texture: ${id}`);
+          // mcmeta atlas uses normalized [u0,v0,u1,v1] coordinates.
+          return uv as UV;
+        },
+      };
+      const mesh = definition?.getMesh(
+        Identifier.parse(state.name),
+        state.properties,
+        atlas,
+        {
+          getBlockModel: (id: Identifier) =>
+            this.models.get(id.toString()) ?? null,
+        },
+        {},
+      );
+      const special = specialBlockMesh(state, blockEntity, atlas);
+      // Bell supports use ordinary block models; the moving body uses an entity model.
+      if (mesh && special) mesh.merge(special);
+      const complete = mesh ?? special;
+      if (complete?.quads.length) geometry = meshGeometry(complete);
+    } catch {
+      /* Unknown modded/unsupported models remain identifiable and selectable. */
+    }
     if (!geometry) {
       this.missing.add(state.name);
       geometry = new THREE.BoxGeometry(1, 1, 1);
@@ -235,7 +264,15 @@ export class Resources {
     if (!images.length && !Object.keys(files).length)
       throw new Error("找不到 assets/ 內的模型或 PNG 材質。");
     // Preserve the default atlas in the upper-left; resource-pack sprites occupy additional rows.
-    const tile = Math.max(16, ...images.map((x) => x.image.width)),
+    const tile = Math.max(
+        16,
+        ...images.map((x) =>
+          Math.max(
+            x.image.width,
+            x.key.includes(":entity/") ? x.image.height : x.image.width,
+          ),
+        ),
+      ),
       cols = Math.floor(this.atlasSize / tile);
     if (cols < 1) throw new Error("材質寬度超過圖集限制。");
     const oldHeight = this.pixelData.height,
@@ -259,22 +296,25 @@ export class Resources {
     images.forEach(({ key, image }, i) => {
       const x = (i % cols) * tile,
         y = oldHeight + Math.floor(i / cols) * tile;
+      const height = key.includes(":entity/")
+        ? image.height
+        : Math.min(image.width, image.height);
       ctx.drawImage(
         image,
         0,
         0,
         image.width,
-        image.width,
+        height,
         x,
         y,
         image.width,
-        image.width,
+        height,
       );
       this.uv[key] = [
         x / this.atlasSize,
         y / newHeight,
         (x + image.width) / this.atlasSize,
-        (y + image.width) / newHeight,
+        (y + height) / newHeight,
       ];
       if (key.startsWith("minecraft:")) this.uv[key.slice(10)] = this.uv[key];
       image.close();

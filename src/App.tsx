@@ -53,7 +53,7 @@ import {
   X,
 } from "lucide-react";
 import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
-import { demoFile } from "./core/demo";
+import { demoFile, blockEntityDemoFile } from "./core/demo";
 import {
   download,
   fingerprint,
@@ -62,6 +62,7 @@ import {
   libraryPut,
 } from "./core/storage";
 import { nbtJson } from "./core/nbt";
+import { blockEntityIndex } from "./core/block-entities";
 import {
   eachBlock,
   materials,
@@ -262,7 +263,11 @@ export default function App() {
   const [rightTab, setRightTab] = useState<"materials" | "block">("materials"),
     [mobilePanel, setMobilePanel] = useState<"left" | "right" | null>(null),
     [dragging, setDragging] = useState(false),
-    [stats, setStats] = useState<{ rendered: number; missing: string[] }>({
+    [stats, setStats] = useState<{
+      rendered: number;
+      missing: string[];
+      textOmitted?: number;
+    }>({
       rendered: 0,
       missing: [],
     });
@@ -734,7 +739,13 @@ export default function App() {
       if (view.hidden.includes(r.name)) continue;
       for (const b of eachBlock(r))
         if (b.state.name === view.highlight) {
-          const selected = { region: r.name, ...b };
+          const selected = {
+            region: r.name,
+            ...b,
+            blockEntity: blockEntityIndex(r.blockEntities).get(
+              b.local.join(","),
+            ),
+          };
           setPicked(selected);
           setRightTab("block");
           patch({ layer: b.position[view.axis] });
@@ -1241,6 +1252,11 @@ export default function App() {
                 <span className="dot-separator">·</span>滾輪縮放
               </span>
               <span>{fmt(stats.rendered)} 可見方塊</span>
+              {!!stats.textOmitted && (
+                <span>
+                  · {fmt(stats.textOmitted)} 面文字已略過（請縮小檢視範圍）
+                </span>
+              )}
             </div>
             {fatal && (
               <div className="fatal-state">
@@ -1572,23 +1588,12 @@ export default function App() {
                     <Search size={15} />
                     高亮相同材料
                   </button>
-                  {(() => {
-                    const r = schematic?.regions.find(
-                      (r) => r.name === picked.region,
-                    );
-                    const entities = r?.blockEntities.filter(
-                      (e) =>
-                        Number(e.x?.value) === picked.local[0] &&
-                        Number(e.y?.value) === picked.local[1] &&
-                        Number(e.z?.value) === picked.local[2],
-                    );
-                    return entities?.length ? (
-                      <details>
-                        <summary>方塊實體 NBT</summary>
-                        <pre>{nbtJson(entities)}</pre>
-                      </details>
-                    ) : null;
-                  })()}
+                  {picked.blockEntity && (
+                    <details>
+                      <summary>方塊實體 NBT</summary>
+                      <pre>{nbtJson(picked.blockEntity)}</pre>
+                    </details>
+                  )}
                 </>
               ) : (
                 <div className="selection-empty">
@@ -1774,8 +1779,19 @@ export default function App() {
             )}
           </div>
           <p className="muted footnote">
-            特殊方塊實體外觀、實體渲染與紅石運作模擬尚未支援。資源包套用後需重新整理分頁才能還原。
+            支援箱子、床、界伏盒、頭顱、告示牌（含文字）、旗幟（含圖樣）、鐘、海靈核心與裝飾陶罐的靜態外觀。
+            玩家頭顱使用預設皮膚；陶罐紋飾、容器內物品、動畫、一般實體與紅石模擬尚未支援。資源包套用後需重新整理分頁才能還原。
           </p>
+          <button
+            className="button"
+            onClick={() => {
+              closeModal();
+              void readFile(blockEntityDemoFile());
+            }}
+          >
+            <Boxes size={15} />
+            探索方塊實體展示台
+          </button>
         </Modal>
       )}
       {modal === "info" && (
@@ -2063,7 +2079,8 @@ export default function App() {
             </p>
           </div>
           <p className="muted footnote">
-            使用 Three.js、Deepslate 與 mcmeta 顯示資源。Minecraft 素材 © Mojang
+            使用 Three.js、Deepslate 與 mcmeta 顯示資源。Minecraft 素材 ©
+            Mojang
             Studios；本網站非官方產品。比較功能依藍圖座標對齊；區域重疊時材料統計按區域累加。
           </p>
         </Modal>

@@ -201,3 +201,143 @@ export function demoFile(): File {
     { type: "application/octet-stream" },
   );
 }
+
+/** Small, downloadable fixture exercises appearance-dependent instancing without uploads. */
+export function blockEntityDemoFile(): File {
+  const size: Vec3 = [15, 4, 11],
+    palette: BlockState[] = [AIR],
+    blocks = new Uint32Array(size[0] * size[1] * size[2]);
+  const tiles: Compound[] = [];
+  const put = (
+    x: number,
+    y: number,
+    z: number,
+    name: string,
+    properties: Record<string, string> = {},
+    nbt?: Compound,
+  ) => {
+    palette.push({ name: `minecraft:${name}`, properties });
+    blocks[(y * size[2] + z) * size[0] + x] = palette.length - 1;
+    if (nbt) tiles.push({ ...nbt, x: tag(3, x), y: tag(3, y), z: tag(3, z) });
+  };
+  for (let x = 0; x < size[0]; x++)
+    for (let z = 0; z < size[2]; z++)
+      put(x, 0, z, (x + z) % 2 ? "smooth_stone" : "polished_andesite");
+  put(1, 1, 2, "chest", { facing: "south", type: "single" });
+  put(4, 1, 2, "chest", { facing: "south", type: "right" });
+  put(5, 1, 2, "chest", { facing: "south", type: "left" });
+  put(7, 1, 2, "ender_chest", { facing: "south" });
+  put(10, 1, 2, "purple_shulker_box", { facing: "up" });
+  put(12, 1, 2, "shulker_box", { facing: "east" });
+  put(1, 1, 5, "red_bed", { facing: "south", part: "foot" });
+  put(1, 1, 6, "red_bed", { facing: "south", part: "head" });
+  put(4, 1, 5, "skeleton_skull", { rotation: "0" });
+  put(6, 1, 5, "player_head", { rotation: "0" });
+  put(8, 1, 5, "decorated_pot", { facing: "south", cracked: "false" });
+  put(10, 1, 5, "conduit", { waterlogged: "false" });
+  put(12, 1, 5, "bell", {
+    facing: "south",
+    attachment: "floor",
+    powered: "false",
+  });
+  const text = (lines: string[], color: string, glow = false) =>
+    compound({
+      messages: list(
+        8,
+        lines.map((text) => JSON.stringify({ text })),
+      ),
+      color: tag(8, color),
+      has_glowing_text: tag(1, glow ? 1 : 0),
+    });
+  put(
+    2,
+    1,
+    9,
+    "oak_sign",
+    { rotation: "0" },
+    {
+      front_text: text(
+        ["你好，Minecraft", "全裝置端預覽", "方塊實體", "liteDisplay"],
+        "black",
+      ),
+      back_text: text(["BACK", "背面文字", "", ""], "blue"),
+    },
+  );
+  put(
+    5,
+    1,
+    9,
+    "oak_sign",
+    { rotation: "0" },
+    {
+      front_text: text(
+        ["不同的文字", "不會合併外觀", "Hello!", ""],
+        "red",
+        true,
+      ),
+    },
+  );
+  put(
+    8,
+    1,
+    9,
+    "white_banner",
+    { rotation: "0" },
+    {
+      patterns: list(10, [
+        { pattern: tag(8, "minecraft:stripe_center"), color: tag(8, "blue") },
+        { pattern: tag(8, "minecraft:border"), color: tag(8, "red") },
+      ]),
+    },
+  );
+  put(
+    11,
+    1,
+    9,
+    "white_banner",
+    { rotation: "0" },
+    {
+      Patterns: list(10, [
+        { Pattern: tag(8, "cr"), Color: tag(3, 14) },
+        { Pattern: tag(8, "bo"), Color: tag(3, 15) },
+      ]),
+    },
+  );
+  const root: Compound = {
+    Version: tag(3, 6),
+    MinecraftDataVersion: tag(3, 3955),
+    Metadata: compound({
+      Name: tag(8, "方塊實體展示台"),
+      Author: tag(8, "liteDisplay"),
+      Description: tag(
+        8,
+        "箱子、床、界伏盒、頭顱、陶罐、海靈核心、鐘、不同文字的告示牌，以及新舊格式旗幟圖樣。",
+      ),
+    }),
+    Regions: compound({
+      展示台: compound({
+        Position: xyz([0, 0, 0]),
+        Size: xyz(size),
+        BlockStatePalette: list(
+          10,
+          palette.map((s) => ({
+            Name: tag(8, s.name),
+            Properties: compound(
+              Object.fromEntries(
+                Object.entries(s.properties).map(([k, v]) => [k, tag(8, v)]),
+              ),
+            ),
+          })),
+        ),
+        BlockStates: tag(12, packIndices(blocks, palette.length)),
+        TileEntities: list(10, tiles),
+        Entities: list(10, []),
+      }),
+    }),
+  };
+  return new File(
+    [writeNbt(root) as Uint8Array<ArrayBuffer>],
+    "block-entities.litematic",
+    { type: "application/octet-stream" },
+  );
+}

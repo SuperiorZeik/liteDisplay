@@ -33,6 +33,10 @@ const vec = (t: Tag | undefined): Vec3 =>
       : t?.type === 9
         ? ((t.value as Tag[]).map((x) => Number(x.value)) as Vec3)
         : [0, 0, 0];
+const posTags = (p: Vec3): Compound =>
+  Object.fromEntries(
+    ["x", "y", "z"].map((k, i) => [k, { type: 3, value: p[i] }]),
+  );
 function validateSize(size: Vec3) {
   if (
     size.length !== 3 ||
@@ -225,7 +229,9 @@ export function parseRoot(
           meta.version === 1 ? obj(e, "EntityData") : e,
         ),
         tiles = comps(c, "TileEntities").map((e) =>
-          meta.version === 1 ? obj(e, "TileNBT") : e,
+          meta.version === 1
+            ? { ...obj(e, "TileNBT"), ...posTags(vec(e.Pos ?? e.pos)) }
+            : e,
         );
       regions.push(region(name, p, s, palette, blocks, entities, tiles));
       onProgress(
@@ -253,7 +259,7 @@ export function parseRoot(
       )
         throw new Error("原版結構的座標或方塊索引無效。");
       blocks[(p[1] * size[2] + p[2]) * size[0] + p[0]] = id + 1;
-      if (b.nbt) tiles.push(obj(b, "nbt"));
+      if (b.nbt) tiles.push({ ...obj(b, "nbt"), ...posTags(p) });
     }
     regions.push(
       region(
@@ -337,7 +343,11 @@ export function parseRoot(
         palette,
         blocks,
         comps(c, "Entities"),
-        comps(bc, "BlockEntities"),
+        comps(bc, "BlockEntities").map((e) =>
+          version === 3
+            ? { ...obj(e, "Data"), Pos: e.Pos, ...(e.Id ? { id: e.Id } : {}) }
+            : e,
+        ),
       ),
     );
   }

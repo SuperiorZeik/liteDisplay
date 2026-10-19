@@ -5,8 +5,28 @@ const base = "https://raw.githubusercontent.com/misode/mcmeta/";
 const files = {
   "blockstates.json": "1.21.1-summary/assets/block_definition/data.min.json",
   "models.json": "1.21.1-summary/assets/model/data.min.json",
-  "atlas.json": "1.21.1-atlas/blocks/data.min.json",
-  "atlas.png": "1.21.1-atlas/blocks/atlas.png",
+  "atlas.json": "1.21.1-atlas/all/data.min.json",
+  "atlas.png": "1.21.1-atlas/all/atlas.png",
+  "steve.png":
+    "1.21.1-assets/assets/minecraft/textures/entity/player/wide/steve.png",
+  ...Object.fromEntries(
+    [
+      "oak",
+      "spruce",
+      "birch",
+      "jungle",
+      "acacia",
+      "dark_oak",
+      "mangrove",
+      "cherry",
+      "bamboo",
+      "crimson",
+      "warped",
+    ].map((wood) => [
+      `hanging-sign-${wood}.png`,
+      `1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/${wood}.png`,
+    ]),
+  ),
   "zh_tw.json": "1.21.1-assets/assets/minecraft/lang/zh_tw.json",
 };
 const dir = resolve("public/minecraft");

@@ -4,8 +4,20 @@
   "files": {
     "blockstates.json": "1.21.1-summary/assets/block_definition/data.min.json",
     "models.json": "1.21.1-summary/assets/model/data.min.json",
-    "atlas.json": "1.21.1-atlas/blocks/data.min.json",
-    "atlas.png": "1.21.1-atlas/blocks/atlas.png",
+    "atlas.json": "1.21.1-atlas/all/data.min.json",
+    "atlas.png": "1.21.1-atlas/all/atlas.png",
+    "steve.png": "1.21.1-assets/assets/minecraft/textures/entity/player/wide/steve.png",
+    "hanging-sign-oak.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/oak.png",
+    "hanging-sign-spruce.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/spruce.png",
+    "hanging-sign-birch.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/birch.png",
+    "hanging-sign-jungle.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/jungle.png",
+    "hanging-sign-acacia.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/acacia.png",
+    "hanging-sign-dark_oak.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/dark_oak.png",
+    "hanging-sign-mangrove.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/mangrove.png",
+    "hanging-sign-cherry.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/cherry.png",
+    "hanging-sign-bamboo.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/bamboo.png",
+    "hanging-sign-crimson.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/crimson.png",
+    "hanging-sign-warped.png": "1.21.1-assets/assets/minecraft/textures/entity/signs/hanging/warped.png",
     "zh_tw.json": "1.21.1-assets/assets/minecraft/lang/zh_tw.json"
   },
   "attribution": "Minecraft assets © Mojang Studios. Not an official Minecraft product."

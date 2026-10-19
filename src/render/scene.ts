@@ -2,6 +2,12 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { Resources } from "./resources";
 import {
+  appearanceKey,
+  blockEntityIndex,
+  signFaces,
+} from "../core/block-entities";
+import { signOverlays } from "./block-entities";
+import {
   blockAt,
   coordKey,
   eachBlock,
@@ -30,12 +36,18 @@ export async function compareSchematics(
   const before = new Map<string, string>(),
     after = new Map<string, string>(),
     oldBlocks = new Map<string, PickedBlock>();
-  for (const r of a.regions)
+  for (const r of a.regions) {
+    const entities = blockEntityIndex(r.blockEntities);
     for (const c of eachBlock(r)) {
       const key = coordKey(c.position);
       before.set(key, stateKey(c.state));
-      oldBlocks.set(key, { region: r.name, ...c });
+      oldBlocks.set(key, {
+        region: r.name,
+        ...c,
+        blockEntity: entities.get(coordKey(c.local)),
+      });
     }
+  }
   await new Promise((r) => setTimeout(r, 0));
   for (const r of b.regions)
     for (const c of eachBlock(r))
@@ -91,7 +103,11 @@ export class BlueprintScene {
   private disposed = false;
   private dirty = true;
   onPick: (b: PickedBlock | null) => void = () => {};
-  onStats: (stats: { rendered: number; missing: string[] }) => void = () => {};
+  onStats: (stats: {
+    rendered: number;
+    missing: string[];
+    textOmitted?: number;
+  }) => void = () => {};
   constructor(private host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -195,6 +211,10 @@ export class BlueprintScene {
       if (o instanceof THREE.InstancedMesh) {
         o.dispose();
         (o.material as THREE.Material).dispose();
+        if (o.userData.signOverlay) {
+          o.geometry.dispose();
+          (o.material as THREE.MeshBasicMaterial).map?.dispose();
+        }
       }
     });
     this.world.clear();
@@ -246,7 +266,7 @@ export class BlueprintScene {
         !settings.highlight ||
         s.name === settings.highlight);
     const add = (b: PickedBlock, type?: string) => {
-      const key = stateKey(b.state) + (type ?? "");
+      const key = appearanceKey(b.state, b.blockEntity) + (type ?? "");
       if (!batches.has(key))
         batches.set(key, { state: b.state, blocks: [], type });
       batches.get(key)!.blocks.push(b);
@@ -259,6 +279,7 @@ export class BlueprintScene {
         new THREE.Vector3(...(r.min.map((v, a) => v + r.size[a]) as Vec3)),
       );
       this.boxes.add(new THREE.Box3Helper(box, 0x9dba84));
+      const entities = blockEntityIndex(r.blockEntities);
       for (const b of eachBlock(r)) {
         if (++visited % 12000 === 0) {
           await new Promise((r) => setTimeout(r, 0));
@@ -301,6 +322,7 @@ export class BlueprintScene {
             position: b.position,
             local: b.local,
             state: b.state,
+            blockEntity: entities.get(coordKey(b.local)),
           },
           type,
         );
@@ -312,8 +334,13 @@ export class BlueprintScene {
     if (token !== this.generation) return;
     this.resources.missing.clear();
     const matrix = new THREE.Matrix4();
+    let textStyles = 0,
+      textOmitted = 0;
     for (const batch of batches.values()) {
-      const geometry = this.resources.geometry(batch.state),
+      const geometry = this.resources.geometry(
+          batch.state,
+          batch.blocks[0].blockEntity,
+        ),
         isGlass = /glass|ice|water/.test(batch.state.name),
         dim = !!settings.highlight && batch.state.name !== settings.highlight;
       const color =
@@ -360,8 +387,49 @@ export class BlueprintScene {
       mesh.computeBoundingSphere();
       this.world.add(mesh);
       this.pickables.push(mesh);
+      const faceCount = /_sign$/.test(batch.state.name)
+        ? signFaces(batch.blocks[0].blockEntity).filter((f) =>
+            f.lines.some(Boolean),
+          ).length
+        : 0;
+      const showText = !batch.type && textStyles + faceCount <= 256;
+      if (showText) textStyles += faceCount;
+      else if (!batch.type) textOmitted += faceCount * batch.blocks.length;
+      if (showText)
+        for (const overlay of signOverlays(
+          batch.state,
+          batch.blocks[0].blockEntity,
+        )) {
+          const textMaterial = new THREE.MeshBasicMaterial({
+            map: overlay.texture,
+            transparent: true,
+            alphaTest: 0.1,
+            opacity: dim ? 0.12 : 1,
+            depthWrite: false,
+            wireframe: settings.wireframe,
+          });
+          const text = new THREE.InstancedMesh(
+            overlay.geometry,
+            textMaterial,
+            batch.blocks.length,
+          );
+          text.userData.blocks = batch.blocks;
+          text.userData.signOverlay = true;
+          batch.blocks.forEach((b, i) => {
+            matrix.makeTranslation(...b.position);
+            text.setMatrixAt(i, matrix);
+          });
+          text.instanceMatrix.needsUpdate = true;
+          text.computeBoundingSphere();
+          this.world.add(text);
+          this.pickables.push(text);
+        }
     }
-    this.onStats({ rendered, missing: [...this.resources.missing] });
+    this.onStats({
+      rendered,
+      missing: [...this.resources.missing],
+      textOmitted,
+    });
     this.dirty = true;
   }
   fit(regionName?: string) {
