@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build && node scripts/build-offline.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test": "tsx --test tests/*.test.ts",
+    "build:pages": "npm test && npm run build",
     "assets": "node scripts/prepare-assets.mjs"
   },
   "dependencies": {

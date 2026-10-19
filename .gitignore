@@ -4,3 +4,10 @@ dist/
 *.tar.gz
 *.tsbuildinfo
 test-results/
+.wrangler/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+*.log

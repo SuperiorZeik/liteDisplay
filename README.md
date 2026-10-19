@@ -21,6 +21,12 @@ npm run preview
 
 `dist/` 是完整的靜態網站，可放到 GitHub Pages、Cloudflare Pages 或其他 HTTPS 靜態空間。支援子路徑部署；不需要 Node.js 伺服器、資料庫或 API 金鑰。直接以 `file://` 開啟不支援 Worker 與離線快取，請用 HTTP 預覽。
 
+## Cloudflare Pages 自動部署
+
+建議連接私人 GitHub repository，正式分支設為 `main`、建置指令 `npm run build:pages`、輸出目錄 `dist`、根目錄留空。Node.js 版本由 `.node-version` 指定為 24。設定一次後，每次 `git push origin main` 都會自動測試並部署，不需要 Cloudflare API token。
+
+完整步驟與網站存取權注意事項請見 [Cloudflare Pages 部署說明](docs/cloudflare-pages.md)。私人 repository 不會讓 Pages 網站自動變成私人。
+
 ## 已實作
 
 - `.litematic` v1–v7、誤命名的 `.litematica`、Sponge `.schem` v2/v3、原版 `.nbt`，以及本站 ZIP 檢視包。
