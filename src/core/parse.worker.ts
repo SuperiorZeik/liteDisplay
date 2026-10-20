@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { parseSchematic } from "./parser";
+import { blockTransfers } from "./block-storage";
 self.onmessage = (
   event: MessageEvent<{ buffer: ArrayBuffer; name: string }>,
 ) => {
@@ -10,10 +11,7 @@ self.onmessage = (
       (progress, label) =>
         self.postMessage({ type: "progress", progress, label }),
     );
-    self.postMessage(
-      { type: "done", schematic: s },
-      s.regions.map((r) => r.blocks.buffer),
-    );
+    self.postMessage({ type: "done", schematic: s }, blockTransfers(s.regions));
   } catch (error) {
     self.postMessage({
       type: "error",

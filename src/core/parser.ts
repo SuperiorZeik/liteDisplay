@@ -1,5 +1,18 @@
 import { readNbt } from "./nbt";
 import {
+  blockIndex,
+  CHUNK_SIZE,
+  createBlockArray,
+  LARGE_VOLUME,
+  MAX_BLOCK_BYTES,
+  MAX_CELLS,
+  packedIndex,
+  packedWords,
+  regionVolume,
+  type BlockArray,
+} from "./block-storage";
+export { MAX_CELLS } from "./block-storage";
+import {
   AIR,
   isAir,
   type BlockState,
@@ -10,7 +23,6 @@ import {
   type Vec3,
 } from "./types";
 
-export const MAX_CELLS = 8_000_000;
 const obj = (c: Compound, k: string): Compound =>
   c[k]?.type === 10 ? (c[k].value as Compound) : Object.create(null);
 const val = (c: Compound, k: string, f: unknown = 0): any => c[k]?.value ?? f;
@@ -46,7 +58,8 @@ function validateSize(size: Vec3) {
   )
     throw new Error("區域尺寸無效。");
   const n = Math.abs(size[0] * size[1] * size[2]);
-  if (n > MAX_CELLS) throw new Error("區域超過 800 萬格，請分割藍圖後開啟。");
+  if (!Number.isSafeInteger(n) || n > MAX_CELLS)
+    throw new Error("區域體積超過 5.12 億格的安全上限，請縮小區域。");
   return n;
 }
 export function unpackIndices(
@@ -54,24 +67,12 @@ export function unpackIndices(
   paletteSize: number,
   volume: number,
 ): Uint32Array {
-  if (!paletteSize || paletteSize > 65536)
-    throw new Error("方塊調色盤為空或過大。");
-  const bits = Math.max(2, Math.ceil(Math.log2(paletteSize))),
-    needed = Math.ceil((volume * bits) / 64);
-  if (words.length !== needed)
-    throw new Error(
-      `方塊資料長度不符：需要 ${needed} 個 long，實際 ${words.length}。`,
-    );
-  const out = new Uint32Array(volume),
-    mask = (1n << BigInt(bits)) - 1n,
-    uwords = BigUint64Array.from(words, (n) => BigInt.asUintN(64, n));
+  const { blocks, bits } = packedWords(words, paletteSize, volume);
+  if (volume * 4 > MAX_BLOCK_BYTES)
+    throw new Error("展開的方塊索引超過 128 MiB。");
+  const out = new Uint32Array(volume);
   for (let i = 0; i < volume; i++) {
-    const bit = i * bits,
-      w = Math.floor(bit / 64),
-      shift = bit % 64;
-    let n = uwords[w] >> BigInt(shift);
-    if (shift + bits > 64) n |= uwords[w + 1] << BigInt(64 - shift);
-    const id = Number(n & mask);
+    const id = packedIndex(blocks, bits, i);
     if (id >= paletteSize) throw new Error(`方塊索引 ${id} 超出調色盤範圍。`);
     out[i] = id;
   }
@@ -109,17 +110,17 @@ function region(
   position: Vec3,
   signedSize: Vec3,
   palette: BlockState[],
-  blocks: Uint32Array,
+  blocks: BlockArray,
   entities: Compound[] = [],
   blockEntities: Compound[] = [],
+  packedBits?: number,
+  onScan = (_fraction: number) => {},
 ): Region {
   const size = signedSize.map(Math.abs) as Vec3,
     min = position.map(
       (n, a) => n + (signedSize[a] < 0 ? signedSize[a] + 1 : 0),
     ) as Vec3;
-  let blockCount = 0;
-  for (const id of blocks) if (palette[id] && !isAir(palette[id])) blockCount++;
-  return {
+  const result: Region = {
     name,
     position,
     signedSize,
@@ -127,10 +128,82 @@ function region(
     min,
     palette,
     blocks,
-    blockCount,
+    blockCount: 0,
     entities,
     blockEntities,
+    ...(packedBits ? { packedBits } : {}),
   };
+  const n = regionVolume(result),
+    counts = new Uint32Array(palette.length),
+    air = palette.map(isAir);
+  const grid = size.map((v) => Math.ceil(v / CHUNK_SIZE)),
+    chunkCount = grid[0] * grid[1] * grid[2];
+  const mask = chunkCount <= 2_000_000 ? new Uint8Array(chunkCount) : undefined;
+  const sparseChunks = mask ? undefined : new Set<number>();
+  const contentMin: Vec3 = [size[0], size[1], size[2]],
+    contentMax: Vec3 = [-1, -1, -1];
+  let occupied = 0,
+    nextProgress = 0;
+  for (let i = 0; i < n; ) {
+    if (i >= nextProgress) {
+      onScan(i / n);
+      nextProgress = i + 1_000_000;
+    }
+    // Air-only spans need no coordinate math or per-cell BigInt operations.
+    if (packedBits && air[0]) {
+      const bit = i * packedBits,
+        shift = bit % 32;
+      const zeros = Math.min(n - i, Math.floor((32 - shift) / packedBits));
+      if (zeros > 1 && blocks[Math.floor(bit / 32)] === 0) {
+        counts[0] += zeros;
+        i += zeros;
+        continue;
+      }
+    }
+    const id = blockIndex(result, i);
+    if (id >= palette.length)
+      throw new Error(`方塊索引 ${id} 超出調色盤範圍。`);
+    counts[id]++;
+    if (!air[id]) {
+      result.blockCount++;
+      const x = i % size[0],
+        z = Math.floor(i / size[0]) % size[2],
+        y = Math.floor(i / (size[0] * size[2]));
+      contentMin[0] = Math.min(contentMin[0], x);
+      contentMin[1] = Math.min(contentMin[1], y);
+      contentMin[2] = Math.min(contentMin[2], z);
+      contentMax[0] = Math.max(contentMax[0], x);
+      contentMax[1] = Math.max(contentMax[1], y);
+      contentMax[2] = Math.max(contentMax[2], z);
+      const chunk =
+        (Math.floor(y / CHUNK_SIZE) * grid[2] + Math.floor(z / CHUNK_SIZE)) *
+          grid[0] +
+        Math.floor(x / CHUNK_SIZE);
+      if (mask) {
+        if (!mask[chunk]) {
+          mask[chunk] = 1;
+          occupied++;
+        }
+      } else if (!sparseChunks!.has(chunk)) {
+        if (sparseChunks!.size >= 1_000_000)
+          throw new Error("有內容的區塊索引超過記憶體預算，請縮小區域。");
+        sparseChunks!.add(chunk);
+      }
+    }
+    i++;
+  }
+  result.counts = counts;
+  result.contentMin = contentMin;
+  result.contentMax = contentMax;
+  if (mask) {
+    const chunks = new Uint32Array(occupied);
+    for (let j = 0, k = 0; j < mask.length; j++) if (mask[j]) chunks[k++] = j;
+    result.occupiedChunks = chunks;
+  } else {
+    result.occupiedChunks = Uint32Array.from(sparseChunks!).sort();
+  }
+  onScan(1);
+  return result;
 }
 export function finishSchematic(
   regions: Region[],
@@ -143,9 +216,11 @@ export function finishSchematic(
   const max = [0, 1, 2].map((a) =>
     Math.max(...regions.map((r) => r.min[a] + r.size[a] - 1)),
   ) as Vec3;
-  const volume = regions.reduce((n, r) => n + r.blocks.length, 0);
+  const volume = regions.reduce((n, r) => n + regionVolume(r), 0);
   if (volume > MAX_CELLS)
-    throw new Error("藍圖總體積超過 800 萬格，請分割後開啟。");
+    throw new Error("藍圖總體積超過 5.12 億格的安全上限。");
+  if (regions.reduce((n, r) => n + r.blocks.byteLength, 0) > MAX_BLOCK_BYTES)
+    throw new Error("所有區域的方塊索引超過 128 MiB 記憶體預算，請縮小區域。");
   return {
     name: "未命名藍圖",
     author: "未知作者",
@@ -204,7 +279,8 @@ export function parseRoot(
       throw new Error(
         `尚未支援 Litematic 格式 v${meta.version}（支援 v1–v7）。`,
       );
-    let total = 0;
+    let total = 0,
+      blockBytes = 0;
     const entries = Object.entries(obj(root, "Regions"));
     if (entries.length > 1024) throw new Error("區域數超過 1024 個。");
     entries.forEach(([name, t], i) => {
@@ -214,17 +290,23 @@ export function parseRoot(
         s = vec(c.Size),
         n = validateSize(s);
       total += n;
-      if (total > MAX_CELLS) throw new Error("總體積超過 800 萬格。");
+      if (total > MAX_CELLS)
+        throw new Error("總體積超過 5.12 億格的安全上限。");
       if (p.some((n) => !Number.isSafeInteger(n) || Math.abs(n) > 30000000))
         throw new Error("區域座標無效。");
       const palette = comps(c, "BlockStatePalette").map(paletteEntry);
       if (c.BlockStates?.type !== 12)
         throw new Error(`區域 ${name} 缺少 BlockStates。`);
-      const blocks = unpackIndices(
+      const { blocks, bits } = packedWords(
         c.BlockStates.value as BigInt64Array,
         palette.length,
         n,
       );
+      blockBytes += blocks.byteLength;
+      if (blockBytes > MAX_BLOCK_BYTES)
+        throw new Error(
+          "所有區域的方塊索引超過 128 MiB 記憶體預算，請縮小區域。",
+        );
       const entities = comps(c, "Entities").map((e) =>
           meta.version === 1 ? obj(e, "EntityData") : e,
         ),
@@ -233,7 +315,14 @@ export function parseRoot(
             ? { ...obj(e, "TileNBT"), ...posTags(vec(e.Pos ?? e.pos)) }
             : e,
         );
-      regions.push(region(name, p, s, palette, blocks, entities, tiles));
+      regions.push(
+        region(name, p, s, palette, blocks, entities, tiles, bits, (fraction) =>
+          onProgress(
+            30 + Math.round((60 * (i + fraction)) / entries.length),
+            `索引區域 ${i + 1} / ${entries.length}`,
+          ),
+        ),
+      );
       onProgress(
         30 + Math.round((60 * (i + 1)) / entries.length),
         `解析區域 ${i + 1} / ${entries.length}`,
@@ -246,7 +335,7 @@ export function parseRoot(
       n = validateSize(size);
     if (size.some((x) => x < 0)) throw new Error("原版結構尺寸必須為正數。");
     const palette = [AIR, ...comps(root, "palette").map(paletteEntry)],
-      blocks = new Uint32Array(n),
+      blocks = createBlockArray(n, palette.length),
       tiles: Compound[] = [];
     for (const b of comps(root, "blocks")) {
       const p = vec(b.pos),
@@ -319,7 +408,7 @@ export function parseRoot(
       null,
     ) as Uint8Array;
     if (!(data instanceof Uint8Array)) throw new Error("Sponge 缺少方塊資料。");
-    const blocks = new Uint32Array(n);
+    const blocks = createBlockArray(n, palette.length);
     let cursor = 0;
     for (let i = 0; i < n; i++) {
       let id = 0,
@@ -359,6 +448,10 @@ export function parseRoot(
   if (meta.dataVersion! > 3955)
     meta.warnings!.push(
       "顯示資源以 Minecraft 1.21.1 為基準；較新或模組方塊可能以替代模型呈現。",
+    );
+  if (regions.reduce((n, r) => n + regionVolume(r), 0) > LARGE_VOLUME)
+    meta.warnings!.push(
+      "大型藍圖會自動以單層模式開啟；完整資料與材料統計仍保留。可調整軸向、樓層或隱藏區域，避免一次載入過多模型。",
     );
   onProgress(100, "完成");
   return finishSchematic(regions, meta);

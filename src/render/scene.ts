@@ -7,6 +7,7 @@ import {
   signFaces,
 } from "../core/block-entities";
 import { signOverlays } from "./block-entities";
+import { LARGE_VOLUME } from "../core/block-storage";
 import {
   blockAt,
   coordKey,
@@ -107,6 +108,7 @@ export class BlueprintScene {
     rendered: number;
     missing: string[];
     textOmitted?: number;
+    renderLimitReached?: boolean;
   }) => void = () => {};
   constructor(private host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -255,6 +257,7 @@ export class BlueprintScene {
       string,
       { state: BlockState; blocks: PickedBlock[]; type?: string }
     >();
+    let renderLimitReached = false;
     let visited = 0,
       rendered = 0;
     const visible = (p: Vec3, s: BlockState) =>
@@ -272,7 +275,7 @@ export class BlueprintScene {
       batches.get(key)!.blocks.push(b);
       rendered++;
     };
-    for (const r of state.regions) {
+    renderRegions: for (const r of state.regions) {
       if (settings.hidden.includes(r.name)) continue;
       const box = new THREE.Box3(
         new THREE.Vector3(...r.min),
@@ -280,7 +283,7 @@ export class BlueprintScene {
       );
       this.boxes.add(new THREE.Box3Helper(box, 0x9dba84));
       const entities = blockEntityIndex(r.blockEntities);
-      for (const b of eachBlock(r)) {
+      for (const b of eachBlock(r, settings)) {
         if (++visited % 12000 === 0) {
           await new Promise((r) => setTimeout(r, 0));
           if (token !== this.generation) return;
@@ -312,10 +315,10 @@ export class BlueprintScene {
           }
           if (surrounded) continue;
         }
-        if (rendered >= 500000)
-          throw new Error(
-            "目前可見方塊超過 50 萬個，請使用分層或隱藏部分區域後重試。",
-          );
+        if (rendered >= 500000) {
+          renderLimitReached = true;
+          break renderRegions;
+        }
         add(
           {
             region: r.name,
@@ -330,7 +333,13 @@ export class BlueprintScene {
     }
     if (diff)
       for (const b of diff.removedBlocks)
-        if (visible(b.position, b.state)) add(b, "removed");
+        if (visible(b.position, b.state)) {
+          if (rendered >= 500000) {
+            renderLimitReached = true;
+            break;
+          }
+          add(b, "removed");
+        }
     if (token !== this.generation) return;
     this.resources.missing.clear();
     const matrix = new THREE.Matrix4();
@@ -429,6 +438,7 @@ export class BlueprintScene {
       rendered,
       missing: [...this.resources.missing],
       textOmitted,
+      renderLimitReached,
     });
     this.dirty = true;
   }
@@ -437,8 +447,37 @@ export class BlueprintScene {
     const r = regionName
       ? this.state.regions.find((r) => r.name === regionName)
       : undefined;
-    const size = r?.size ?? this.state.size,
+    let size = r?.size ?? this.state.size,
       min = r?.min ?? this.state.min;
+    if (this.state.volume > LARGE_VOLUME) {
+      const lower: Vec3 = [Infinity, Infinity, Infinity],
+        upper: Vec3 = [-Infinity, -Infinity, -Infinity];
+      for (const region of r ? [r] : this.state.regions) {
+        if (!region.blockCount || this.settings?.hidden.includes(region.name))
+          continue;
+        const lo = region.min.map(
+          (v, a) => v + (region.contentMin?.[a] ?? 0),
+        ) as Vec3;
+        const hi = region.min.map(
+          (v, a) => v + (region.contentMax?.[a] ?? region.size[a] - 1),
+        ) as Vec3;
+        if (this.settings && this.settings.mode !== "all") {
+          const a = this.settings.axis;
+          hi[a] = Math.min(hi[a], this.settings.layer);
+          if (this.settings.mode === "single")
+            lo[a] = Math.max(lo[a], this.settings.layer);
+        }
+        if (lo.some((v, a) => v > hi[a])) continue;
+        for (const a of [0, 1, 2]) {
+          lower[a] = Math.min(lower[a], lo[a]);
+          upper[a] = Math.max(upper[a], hi[a]);
+        }
+      }
+      if (lower.every(Number.isFinite)) {
+        min = lower;
+        size = upper.map((v, a) => v - lower[a] + 1) as Vec3;
+      }
+    }
     const center = new THREE.Vector3(
       min[0] + size[0] / 2,
       min[1] + size[1] / 2,

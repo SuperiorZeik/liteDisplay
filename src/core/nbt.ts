@@ -244,7 +244,10 @@ export function writeNbt(root: Compound, compressed = true): Uint8Array {
       case 12: {
         const a = t.value as BigInt64Array;
         num(a.length, 4);
-        for (const n of a) write(tag(4, n));
+        const bytes = new Uint8Array(a.length * 8),
+          view = new DataView(bytes.buffer);
+        for (let i = 0; i < a.length; i++) view.setBigInt64(i * 8, a[i]);
+        chunks.push(bytes);
         break;
       }
     }

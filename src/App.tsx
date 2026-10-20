@@ -63,6 +63,7 @@ import {
 } from "./core/storage";
 import { nbtJson } from "./core/nbt";
 import { blockEntityIndex } from "./core/block-entities";
+import { startingSlice } from "./core/block-storage";
 import {
   eachBlock,
   materials,
@@ -267,6 +268,7 @@ export default function App() {
       rendered: number;
       missing: string[];
       textOmitted?: number;
+      renderLimitReached?: boolean;
     }>({
       rendered: 0,
       missing: [],
@@ -387,7 +389,12 @@ export default function App() {
             setView(validView(saved.view, parsed));
             notice("已套用與此檔案相符的分享視角。");
           } else {
-            setView({ ...initialView, layer: parsed.max[1] });
+            const slice = startingSlice(parsed);
+            setView({ ...initialView, ...slice });
+            if (slice.mode === "single")
+              notice(
+                "大型藍圖已以單層模式開啟，可調整樓層或切換全部；完整材料統計仍保留。",
+              );
             if (saved) notice("分享視角屬於另一份檔案，已使用預設視角。", true);
           }
           try {
@@ -556,7 +563,7 @@ export default function App() {
     const count = new Map<string, number>();
     for (const r of schematic.regions) {
       if (view.hidden.includes(r.name)) continue;
-      for (const b of eachBlock(r)) {
+      for (const b of eachBlock(r, view)) {
         const p = b.position[view.axis];
         if (view.mode === "single" ? p === view.layer : p <= view.layer)
           count.set(b.state.name, (count.get(b.state.name) ?? 0) + 1);
@@ -1256,6 +1263,9 @@ export default function App() {
                 <span>
                   · {fmt(stats.textOmitted)} 面文字已略過（請縮小檢視範圍）
                 </span>
+              )}
+              {stats.renderLimitReached && (
+                <span>已達預覽上限，請分層或隱藏區域。</span>
               )}
             </div>
             {fatal && (
@@ -2032,7 +2042,9 @@ export default function App() {
                 <p>
                   拖入 .litematic（v1–v7）、Sponge .schem（v2／v3）、原版
                   .nbt，或本站匯出的 ZIP 檢視包。檔案上限 64 MB，總區域體積上限
-                  800 萬格。
+                  5.12 億格；方塊索引上限 128
+                  MiB。大型藍圖自動以單層模式開啟，預覽最多顯示 50
+                  萬個可見方塊。
                 </p>
               </section>
             </div>

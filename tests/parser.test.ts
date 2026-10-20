@@ -111,7 +111,7 @@ test("invalid NBT and excessive region volumes fail before allocating blocks", (
         }),
         "bad.litematic",
       ),
-    /800 萬/,
+    /安全上限/,
   );
 });
 test("vanilla structure without air in its palette keeps empty cells as air", () => {
