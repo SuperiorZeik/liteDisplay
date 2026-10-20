@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { BlockDefinition } from "deepslate/render";
+import * as THREE from "three";
+import { BlockDefinition, type Mesh } from "deepslate/render";
 import {
   appearanceKey,
   bannerPatterns,
@@ -228,6 +229,116 @@ test("double chest halves join on the correct edge in all four directions", () =
     );
     left.dispose();
     right.dispose();
+  }
+});
+
+test("split chest skins map every exterior face to its native pixel rectangle in all directions", () => {
+  const angles: Record<string, number> = {
+    north: 0,
+    west: Math.PI / 2,
+    south: Math.PI,
+    east: -Math.PI / 2,
+  };
+  const unitAtlas = {
+    getTextureAtlas: () => ({}) as ImageData,
+    getTextureUV: () => [0, 0, 1, 1] as [number, number, number, number],
+  };
+  const rounded = (n: number) => Math.round(n * 1e6) / 1e6;
+  for (const name of ["chest", "trapped_chest"])
+    for (const type of ["left", "right"])
+      for (const [facing, angle] of Object.entries(angles)) {
+        const mesh = specialBlockMesh(
+          state(name, { type, facing }),
+          undefined,
+          unitAtlas,
+        )!;
+        const rotation = new THREE.Matrix4().makeRotationY(angle);
+        const expected = [
+          { normal: [0, 0, -1], body: [43, 33, 58, 43], lid: [43, 15, 58, 19] },
+          { normal: [0, 0, 1], body: [14, 33, 29, 43], lid: [14, 15, 29, 19] },
+          {
+            normal: type === "left" ? [-1, 0, 0] : [1, 0, 0],
+            body: type === "left" ? [29, 33, 43, 43] : [0, 33, 14, 43],
+            lid: type === "left" ? [29, 15, 43, 19] : [0, 15, 14, 19],
+          },
+        ];
+        for (const { normal, body, lid } of expected)
+          for (const [part, rect] of [
+            ["body", body],
+            ["lid", lid],
+          ] as const) {
+            const direction = new THREE.Vector3(...normal).transformDirection(
+              rotation,
+            );
+            const q = mesh.quads.find((q) => {
+              const ys = q.vertices().map((v) => v.pos.y);
+              return (
+                new THREE.Vector3(...q.normal().components()).dot(direction) >
+                  0.999 &&
+                rounded(Math.min(...ys) * 16) === (part === "body" ? 0 : 10) &&
+                rounded(Math.max(...ys) * 16) === (part === "body" ? 10 : 14)
+              );
+            });
+            assert(q, `${name} ${type} ${facing} ${part}`);
+            const uv = q
+              .vertices()
+              .map((v) => v.texture!.map((n) => rounded(n * 64)));
+            assert.deepEqual(
+              [
+                Math.min(...uv.map((v) => v[0])),
+                Math.min(...uv.map((v) => v[1])),
+                Math.max(...uv.map((v) => v[0])),
+                Math.max(...uv.map((v) => v[1])),
+              ],
+              rect,
+              `${name} ${type} ${facing} ${part} exterior UV`,
+            );
+          }
+      }
+});
+
+test("split chest top/bottom UV orientation and latch match the north-facing entity model", () => {
+  const unitAtlas = {
+    getTextureAtlas: () => ({}) as ImageData,
+    getTextureUV: () => [0, 0, 1, 1] as [number, number, number, number],
+  };
+  const pixels = (q: Mesh["quads"][number]) =>
+    q.vertices().map((v) => v.texture!.map((n) => Math.round(n * 64)));
+  for (const type of ["left", "right"]) {
+    const mesh = specialBlockMesh(
+      state("chest", { type, facing: "north" }),
+      undefined,
+      unitAtlas,
+    )!;
+    // BlockModel emits each cuboid as up, down, south, north, east, west.
+    assert.deepEqual(pixels(mesh.quads[0]), [
+      [44, 33],
+      [29, 33],
+      [29, 19],
+      [44, 19],
+    ]);
+    assert.deepEqual(pixels(mesh.quads[1]), [
+      [29, 19],
+      [14, 19],
+      [14, 33],
+      [29, 33],
+    ]);
+    assert.deepEqual(pixels(mesh.quads[6]), [
+      [44, 14],
+      [29, 14],
+      [29, 0],
+      [44, 0],
+    ]);
+    const latch = mesh.quads.slice(12);
+    const z = latch.flatMap((q) => q.vertices().map((v) => v.pos.z * 16));
+    assert.equal(Math.min(...z), 0);
+    assert.equal(Math.max(...z), 1);
+    assert.deepEqual(pixels(latch[3]), [
+      [4, 1],
+      [3, 1],
+      [3, 5],
+      [4, 5],
+    ]);
   }
 });
 

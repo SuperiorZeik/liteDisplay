@@ -48,6 +48,7 @@ function doubleChest(state: BlockState, atlas: TextureAtlasProvider) {
     w: number,
     h: number,
     d: number,
+    bottomCrop = 0,
   ) => {
     const face = (rect: number[], rotation = 180) => ({
       texture: "#0",
@@ -58,12 +59,21 @@ function doubleChest(state: BlockState, atlas: TextureAtlasProvider) {
       from,
       to,
       faces: {
-        north: face([u + d + w + d, v + d, u + d + w + d + w, v + d + h]),
-        east: face([u + d + w, v + d, u + d + w + d, v + d + h]),
-        south: face([u + d, v + d, u + d + w, v + d + h]),
-        west: face([u, v + d, u + d, v + d + h]),
-        up: face([u + d + w, v, u + d + 2 * w, v + d], 0),
-        down: face([u + d, v, u + d + w, v + d], 0),
+        // The entity model faces south; our unrotated mesh faces north.
+        // That half-turn swaps east/west UVs too. The unused inner side is
+        // transparent in the split skins, so failing to swap it cuts a hole
+        // into the visible outside wall of a double chest.
+        north: face([
+          u + d + w + d,
+          v + d + bottomCrop,
+          u + d + w + d + w,
+          v + d + h,
+        ]),
+        east: face([u, v + d + bottomCrop, u + d, v + d + h]),
+        south: face([u + d, v + d + bottomCrop, u + d + w, v + d + h]),
+        west: face([u + d + w, v + d + bottomCrop, u + d + w + d, v + d + h]),
+        up: face([u + d + 2 * w, v, u + d + w, v + d], 0),
+        down: face([u + d, v, u + d + w, v + d]),
       },
     };
   };
@@ -73,8 +83,10 @@ function doubleChest(state: BlockState, atlas: TextureAtlasProvider) {
     textures: { 0: texture },
     elements: [
       box([min, 0, 1], [max, 10, 15], 0, 19, 15, 10, 14),
-      box([min, 10, 1], [max, 14, 15], 0, 0, 15, 4, 14),
-      box([left ? 15 : 0, 7, 0], [left ? 16 : 1, 11, 2], 0, 0, 1, 4, 2),
+      // Vanilla's five-pixel lid starts at y=9, overlapping the body by one.
+      // Crop that hidden row in both geometry and UVs to prevent z-fighting.
+      box([min, 10, 1], [max, 14, 15], 0, 0, 15, 5, 14, 1),
+      box([left ? 15 : 0, 7, 0], [left ? 16 : 1, 11, 1], 0, 0, 1, 4, 1),
     ],
   });
   const mesh = model.getMesh(atlas, {});
