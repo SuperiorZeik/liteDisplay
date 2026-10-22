@@ -91,9 +91,9 @@ export class BlueprintScene {
   private world = new THREE.Group();
   private boxes = new THREE.Group();
   private markers = new THREE.Group();
-  private grid = new THREE.GridHelper(64, 64, 0x4b6257, 0x293b32);
+  private grid = new THREE.GridHelper(64, 64, 0x3b4048, 0x25292f);
   private pickables: THREE.InstancedMesh[] = [];
-  private highlightBox = new THREE.Box3Helper(new THREE.Box3(), 0xc2f79c);
+  private highlightBox = new THREE.Box3Helper(new THREE.Box3(), 0x8fb6ff);
   private resizeObserver: ResizeObserver;
   private raf = 0;
   private generation = 0;
@@ -139,11 +139,11 @@ export class BlueprintScene {
       this.highlightBox,
     );
     this.highlightBox.visible = false;
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x849b8c, 2.4));
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f99, 2.4));
     const sun = new THREE.DirectionalLight(0xfff3db, 2.2);
     sun.position.set(-30, 70, 40);
     this.scene.add(sun);
-    this.scene.fog = new THREE.FogExp2(0x17231e, 0.0012);
+    this.scene.fog = new THREE.FogExp2(0x16181c, 0.0012);
     this.camera.position.set(40, 35, 40);
     this.controls.target.set(0, 5, 0);
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -281,7 +281,7 @@ export class BlueprintScene {
         new THREE.Vector3(...r.min),
         new THREE.Vector3(...(r.min.map((v, a) => v + r.size[a]) as Vec3)),
       );
-      this.boxes.add(new THREE.Box3Helper(box, 0x9dba84));
+      this.boxes.add(new THREE.Box3Helper(box, 0x6f9dff));
       const entities = blockEntityIndex(r.blockEntities);
       for (const b of eachBlock(r, settings)) {
         if (++visited % 12000 === 0) {
@@ -360,7 +360,7 @@ export class BlueprintScene {
             : batch.type === "changed"
               ? 0xffcd6b
               : settings.highlight === batch.state.name
-                ? 0xc5ffb1
+                ? 0xc4d8ff
                 : 0xffffff;
       const material = new THREE.MeshLambertMaterial({
         map:
@@ -615,12 +615,12 @@ export class BlueprintScene {
     const old = this.renderer.getSize(new THREE.Vector2());
     const gridVisible = this.grid.visible;
     this.grid.visible = transparent ? false : gridVisible;
-    this.renderer.setClearColor(0x17231e, transparent ? 0 : 1);
+    this.renderer.setClearColor(0x16181c, transparent ? 0 : 1);
     this.renderer.setSize(old.x * scale, old.y * scale, false);
     this.renderer.render(this.scene, this.camera);
     const url = this.renderer.domElement.toDataURL("image/png");
     this.renderer.setSize(old.x, old.y, false);
-    this.renderer.setClearColor(0x17231e, 0);
+    this.renderer.setClearColor(0x16181c, 0);
     this.grid.visible = gridVisible;
     this.dirty = true;
     return url;

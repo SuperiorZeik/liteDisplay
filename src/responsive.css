@@ -1,4 +1,143 @@
-.brand small {
-  white-space: nowrap;
-  letter-spacing: 1px;
+@media (max-width: 1200px) {
+  .sidebar-left {
+    width: 232px;
+  }
+  .sidebar-right {
+    width: 280px;
+  }
+  .statusbar .hide-sm {
+    display: none;
+  }
+}
+
+/* drawers */
+@media (max-width: 900px) {
+  .only-mobile {
+    display: inline-flex !important;
+  }
+  .sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 20;
+    box-shadow: var(--shadow);
+    transition: transform 0.2s ease;
+  }
+  .sidebar-left {
+    left: 0;
+    width: min(280px, 86vw);
+    transform: translateX(-100%);
+  }
+  .sidebar-right {
+    right: 0;
+    width: min(320px, 90vw);
+    transform: translateX(100%);
+  }
+  .sidebar.open {
+    transform: none;
+  }
+  .sidebar:not(.open) {
+    visibility: hidden;
+    transition:
+      transform 0.2s ease,
+      visibility 0s 0.2s;
+  }
+  .scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    background: rgba(8, 9, 11, 0.55);
+    animation: fade 0.15s ease-out;
+  }
+}
+
+@media (max-width: 600px) {
+  .topbar {
+    gap: 10px;
+    padding: 0 6px 0 12px;
+  }
+  .brand-name,
+  .topbar-sep,
+  .doc-meta,
+  .topbar-actions .label {
+    display: none;
+  }
+  .topbar-actions .btn {
+    width: 32px;
+    padding: 0;
+  }
+  .hud-top-left {
+    top: 8px;
+    left: 8px;
+  }
+  .hud-top-right {
+    top: 8px;
+    right: 8px;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+  .hud-top-left .seg button {
+    padding: 0 7px;
+  }
+  .hud-top-center {
+    top: auto;
+    bottom: 60px;
+    max-width: calc(100% - 16px);
+  }
+  .hud-bottom-right {
+    right: 8px;
+    bottom: 8px;
+  }
+  .hud-bottom-left {
+    display: none;
+  }
+  .hud-panel small {
+    display: none;
+  }
+  .layerbar {
+    padding: 8px;
+  }
+  .layer-done .label {
+    display: none;
+  }
+  .layer-done {
+    width: 32px;
+    padding: 0;
+  }
+  .statusbar {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 380px) {
+  .hud-chip {
+    display: none;
+  }
+}
+
+/* layer bar: two rows when the stage is narrow —
+   row 1: mode / axis / done, row 2: slider / coordinate */
+@container stage (max-width: 760px) {
+  .layerbar {
+    gap: 8px 10px;
+  }
+  .layerbar-group:last-child {
+    display: contents;
+  }
+  .layer-done {
+    order: 2;
+    margin-left: auto;
+  }
+  .layer-slider {
+    order: 3;
+    flex: 1 1 calc(100% - 120px);
+    min-width: 0;
+    gap: 4px;
+  }
+  .layer-input {
+    order: 4;
+  }
+  .range-end {
+    display: none;
+  }
 }
