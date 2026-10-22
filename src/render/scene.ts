@@ -143,7 +143,6 @@ export class BlueprintScene {
     const sun = new THREE.DirectionalLight(0xfff3db, 2.2);
     sun.position.set(-30, 70, 40);
     this.scene.add(sun);
-    this.scene.fog = new THREE.FogExp2(0x16181c, 0.0012);
     this.camera.position.set(40, 35, 40);
     this.controls.target.set(0, 5, 0);
     this.resizeObserver = new ResizeObserver(() => this.resize());
