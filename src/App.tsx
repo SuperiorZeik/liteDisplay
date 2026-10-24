@@ -2001,7 +2001,7 @@ export default function App() {
                 拖入 .litematic（v1–v7）、Sponge .schem（v2／v3）、原版
                 .nbt，或本站匯出的 ZIP 檢視包。檔案上限 64 MB，總區域體積上限
                 5.12 億格，方塊索引上限 128 MiB。大型藍圖會以單層模式開啟，預覽最多顯示
-                50 萬個可見方塊。
+                200 萬個可見方塊，並依模型種類限制批次數。
               </p>
             </li>
             <li>

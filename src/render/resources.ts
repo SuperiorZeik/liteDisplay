@@ -11,6 +11,7 @@ import { type BlockState, type Compound } from "../core/types";
 import { appearanceKey } from "../core/block-entities";
 import { meshGeometry, specialBlockMesh } from "./block-entities";
 import translations from "../data/block-labels.json";
+import { FACE_DIRECTIONS } from "./visibility";
 
 export const labels: Record<string, string> = translations;
 export function blockLabel(name: string) {
@@ -47,6 +48,7 @@ export class Resources {
   texture!: THREE.Texture;
   missing = new Set<string>();
   customName = "";
+  revision = 0;
   private urls: string[] = [];
   async load() {
     const base = import.meta.env.BASE_URL + "minecraft/";
@@ -140,6 +142,7 @@ export class Resources {
     this.texture.generateMipmaps = false;
   }
   private buildModels() {
+    this.revision++;
     this.models.clear();
     for (const [key, data] of Object.entries(this.rawModels))
       this.models.set(
@@ -158,8 +161,8 @@ export class Resources {
     this.geometries.clear();
     this.missing.clear();
   }
-  geometry(state: BlockState, blockEntity?: Compound): THREE.BufferGeometry {
-    const key = appearanceKey(state, blockEntity);
+  geometry(state: BlockState, blockEntity?: Compound, faceMask = 0): THREE.BufferGeometry {
+    const key = appearanceKey(state, blockEntity) + `|faces:${faceMask}`;
     if (this.geometries.has(key)) {
       const geometry = this.geometries.get(key)!;
       if (geometry.userData.fallback) this.missing.add(state.name);
@@ -189,13 +192,18 @@ export class Resources {
           getBlockModel: (id: Identifier) =>
             this.models.get(id.toString()) ?? null,
         },
-        {},
+        Object.fromEntries(FACE_DIRECTIONS.map((face, i) => [face, !!(faceMask & (1 << i))])),
       );
       const special = specialBlockMesh(state, blockEntity, atlas);
       // Bell supports use ordinary block models; the moving body uses an entity model.
       if (mesh && special) mesh.merge(special);
       const complete = mesh ?? special;
       if (complete?.quads.length) geometry = meshGeometry(complete);
+      else if (faceMask && complete && this.geometry(state, blockEntity).userData.fallback !== true) {
+        // A completely culled model is empty, not an unsupported block.
+        geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(), 3));
+      }
     } catch {
       /* Unknown modded/unsupported models remain identifiable and selectable. */
     }

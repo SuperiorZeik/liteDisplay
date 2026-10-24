@@ -5,16 +5,17 @@ import { BlueprintScene } from "../src/render/scene";
 import { compound, list, tag, xyz } from "../src/core/nbt";
 import { parseRoot } from "../src/core/parser";
 import { materials, type ViewSettings } from "../src/core/types";
+import { MAX_PREVIEW_BLOCKS } from "../src/render/visibility";
 
 test("preview keeps a bounded mesh and reports truncation instead of throwing away large files", async () => {
-  const n = 501_000;
+  const n = 2_001_000;
   const schematic = parseRoot(
     {
       Version: tag(3, 6),
       Regions: compound({
         main: compound({
           Position: xyz([0, 0, 0]),
-          Size: xyz([1000, 1, 501]),
+          Size: xyz([1000, 1, 2001]),
           BlockStatePalette: list(10, [{ Name: tag(8, "minecraft:stone") }]),
           BlockStates: tag(12, new BigInt64Array(Math.ceil((n * 2) / 64))),
         }),
@@ -56,11 +57,20 @@ test("preview keeps a bounded mesh and reports truncation instead of throwing aw
     quality: "low",
   };
   await scene.update(schematic, view);
-  assert.equal(stats?.rendered, 500_000);
+  assert.equal(stats?.rendered, MAX_PREVIEW_BLOCKS);
   assert.equal(stats?.renderLimitReached, true);
-  assert.equal((scene as any).world.children[0].count, 500_000);
+  assert.equal((scene as any).world.children.reduce((n: number, mesh: any) => n + mesh.count, 0), MAX_PREVIEW_BLOCKS);
+  assert((scene as any).world.children.every((mesh: any) => mesh.offsets.array.byteLength === mesh.count * 12));
   assert.equal(materials(schematic)[0].count, n);
   assert.equal(schematic.blockCount, n);
+  const meshes = [...(scene as any).world.children];
+  await scene.update(schematic, { ...view, grid: true, wireframe: true });
+  assert.deepEqual((scene as any).world.children, meshes, "display toggles reuse all buffers");
+  assert(meshes.every((mesh) => mesh.material.wireframe));
+  // A slice rebuild must still reach blocks above the previous preview cutoff.
+  await scene.update(schematic, { ...view, axis: 2, mode: "single", layer: 2000 });
+  assert.equal(stats?.rendered, 1000);
+  assert.equal(stats?.renderLimitReached, false);
   (scene as any).clear();
   geometry.dispose();
   texture.dispose();

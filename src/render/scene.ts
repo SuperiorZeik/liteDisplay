@@ -2,19 +2,18 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { Resources } from "./resources";
 import {
-  appearanceKey,
   blockEntityIndex,
   signFaces,
 } from "../core/block-entities";
 import { signOverlays } from "./block-entities";
 import { LARGE_VOLUME } from "../core/block-storage";
+import { BlockInstances, translatedMaterial } from "./instances";
+import { buildPreview, pickBlock, type PreviewStyle } from "./preview";
+import { fullyOpaque } from "./visibility";
 import {
-  blockAt,
   coordKey,
   eachBlock,
-  isAir,
   stateKey,
-  type BlockState,
   type PickedBlock,
   type Schematic,
   type Vec3,
@@ -75,13 +74,6 @@ export async function compareSchematics(
     }
   return { added, removed, changed, cells, removedBlocks };
 }
-const fullyOpaque = (s: BlockState | undefined) =>
-  !!s &&
-  !isAir(s) &&
-  !/glass|leaves|stairs|slab|fence|door|trapdoor|wall$|pane|water|lava|torch|lantern|flower|poppy|tulip|sapling|rail|wire|lever|button|carpet|bed$|chest|hopper|chain|iron_bars|sign|banner|grass$|vine|ladder|cactus|snow$|campfire|candle|head|skull|pot|anvil|repeater|comparator|lily|bamboo|scaffolding|mushroom|seagrass|kelp|coral|lichen|roots|crop|wheat|beetroot|carrot|potato|stem|bush|dripleaf|azalea|fern|flowering|sugar_cane|lightning_rod|end_rod|tripwire|brewing|cauldron|enchanting|grindstone|stonecutter|bell|lectern|conduit|sea_pickle|turtle_egg|cocoa|snow|pointed|amethyst|pressure_plate|farmland|dirt_path/.test(
-    s.name,
-  );
-
 export class BlueprintScene {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
@@ -92,7 +84,9 @@ export class BlueprintScene {
   private boxes = new THREE.Group();
   private markers = new THREE.Group();
   private grid = new THREE.GridHelper(64, 64, 0x3b4048, 0x25292f);
-  private pickables: THREE.InstancedMesh[] = [];
+  private pickables: BlockInstances[] = [];
+  private completedSettings?: ViewSettings;
+  private resourceRevision?: number;
   private highlightBox = new THREE.Box3Helper(new THREE.Box3(), 0x8fb6ff);
   private resizeObserver: ResizeObserver;
   private raf = 0;
@@ -182,8 +176,8 @@ export class BlueprintScene {
     ray.setFromCamera(pointer, this.camera);
     const hit = ray.intersectObjects(this.pickables, false)[0];
     if (hit && hit.instanceId !== undefined) {
-      const m = hit.object as THREE.InstancedMesh;
-      const b = (m.userData.blocks as PickedBlock[])[hit.instanceId];
+      const m = hit.object as BlockInstances;
+      const b = m.userData.pick(hit.instanceId) as PickedBlock;
       this.select(b);
       this.onPick(b);
     } else {
@@ -208,16 +202,18 @@ export class BlueprintScene {
     this.dirty = true;
   }
   private clear() {
+    const materials = new Set<THREE.Material>();
     this.world.traverse((o) => {
-      if (o instanceof THREE.InstancedMesh) {
-        o.dispose();
-        (o.material as THREE.Material).dispose();
+      if (o instanceof BlockInstances) {
+        o.geometry.dispose();
+        materials.add(o.material as THREE.Material);
         if (o.userData.signOverlay) {
-          o.geometry.dispose();
+          o.base.dispose();
           (o.material as THREE.MeshBasicMaterial).map?.dispose();
         }
       }
     });
+    for (const material of materials) material.dispose();
     this.world.clear();
     this.pickables = [];
     this.boxes.traverse((o) => {
@@ -229,18 +225,35 @@ export class BlueprintScene {
     this.boxes.clear();
   }
   async update(state: Schematic, settings: ViewSettings, diff?: DiffResult) {
-    const token = ++this.generation,
-      changed = this.state !== state;
-    this.state = state;
+    const previous = this.completedSettings;
+    const changed = this.state !== state;
+    const sameContents = !changed && this.diff === diff && previous && this.resourceRevision === this.resources.revision &&
+      previous.axis === settings.axis && previous.mode === settings.mode &&
+      (settings.mode === "all" || previous.layer === settings.layer) &&
+      previous.highlight === settings.highlight && previous.isolate === settings.isolate &&
+      previous.hidden.length === settings.hidden.length &&
+      previous.hidden.every((name, i) => name === settings.hidden[i]);
+    this.grid.visible = settings.grid;
+    this.boxes.visible = settings.bounds;
+    this.renderer.setPixelRatio(settings.quality === "low" ? 1 : Math.min(devicePixelRatio, 2));
     this.settings = settings;
+    if (sameContents) {
+      this.world.traverse((o) => {
+        if (o instanceof BlockInstances) {
+          const material = o.material as THREE.MeshLambertMaterial;
+          material.wireframe = settings.wireframe;
+        }
+      });
+      this.completedSettings = settings;
+      this.dirty = true;
+      return;
+    }
+    const token = ++this.generation;
+    this.completedSettings = undefined;
+    this.state = state;
     this.diff = diff;
     this.clear();
     this.highlightBox.visible = false;
-    this.grid.visible = settings.grid;
-    this.boxes.visible = settings.bounds;
-    this.renderer.setPixelRatio(
-      settings.quality === "low" ? 1 : Math.min(devicePixelRatio, 2),
-    );
     const center = new THREE.Vector3(
       (state.min[0] + state.max[0] + 1) / 2,
       state.min[1],
@@ -251,188 +264,91 @@ export class BlueprintScene {
     this.markers.position.copy(this.world.position);
     this.grid.position.y = -0.025;
     this.grid.scale.setScalar(Math.max(...state.size) / 48);
-    if (changed) this.fit();
-    const batches = new Map<
-      string,
-      { state: BlockState; blocks: PickedBlock[]; type?: string }
-    >();
-    let renderLimitReached = false;
-    let visited = 0,
-      rendered = 0;
-    const visible = (p: Vec3, s: BlockState) =>
-      (settings.mode === "all" ||
-        (settings.mode === "single"
-          ? p[settings.axis] === settings.layer
-          : p[settings.axis] <= settings.layer)) &&
-      (!settings.isolate ||
-        !settings.highlight ||
-        s.name === settings.highlight);
-    const add = (b: PickedBlock, type?: string) => {
-      const key = appearanceKey(b.state, b.blockEntity) + (type ?? "");
-      if (!batches.has(key))
-        batches.set(key, { state: b.state, blocks: [], type });
-      batches.get(key)!.blocks.push(b);
-      rendered++;
-    };
-    renderRegions: for (const r of state.regions) {
+    for (const r of state.regions) {
       if (settings.hidden.includes(r.name)) continue;
       const box = new THREE.Box3(
         new THREE.Vector3(...r.min),
         new THREE.Vector3(...(r.min.map((v, a) => v + r.size[a]) as Vec3)),
       );
       this.boxes.add(new THREE.Box3Helper(box, 0x6f9dff));
-      const entities = blockEntityIndex(r.blockEntities);
-      for (const b of eachBlock(r, settings)) {
-        if (++visited % 12000 === 0) {
-          await new Promise((r) => setTimeout(r, 0));
-          if (token !== this.generation) return;
-        }
-        if (!visible(b.position, b.state)) continue;
-        const type = diff?.cells.get(coordKey(b.position));
-        if (diff && !type) continue;
-        if (!diff && fullyOpaque(b.state)) {
-          const [x, y, z] = b.local;
-          let surrounded = true;
-          for (const [dx, dy, dz] of [
-            [1, 0, 0],
-            [-1, 0, 0],
-            [0, 1, 0],
-            [0, -1, 0],
-            [0, 0, 1],
-            [0, 0, -1],
-          ]) {
-            const near = blockAt(r, x + dx, y + dy, z + dz),
-              p: Vec3 = [
-                b.position[0] + dx,
-                b.position[1] + dy,
-                b.position[2] + dz,
-              ];
-            if (!fullyOpaque(near) || !visible(p, near!)) {
-              surrounded = false;
-              break;
-            }
-          }
-          if (surrounded) continue;
-        }
-        if (rendered >= 500000) {
-          renderLimitReached = true;
-          break renderRegions;
-        }
-        add(
-          {
-            region: r.name,
-            position: b.position,
-            local: b.local,
-            state: b.state,
-            blockEntity: entities.get(coordKey(b.local)),
-          },
-          type,
-        );
-      }
     }
-    if (diff)
-      for (const b of diff.removedBlocks)
-        if (visible(b.position, b.state)) {
-          if (rendered >= 500000) {
-            renderLimitReached = true;
-            break;
-          }
-          add(b, "removed");
-        }
-    if (token !== this.generation) return;
+    if (changed) this.fit();
     this.resources.missing.clear();
-    const matrix = new THREE.Matrix4();
-    let textStyles = 0,
-      textOmitted = 0;
-    for (const batch of batches.values()) {
-      const geometry = this.resources.geometry(
-          batch.state,
-          batch.blocks[0].blockEntity,
-        ),
-        isGlass = /glass|ice|water/.test(batch.state.name),
-        dim = !!settings.highlight && batch.state.name !== settings.highlight;
-      const color =
-        batch.type === "added"
-          ? 0x72e79a
-          : batch.type === "removed"
-            ? 0xe78578
-            : batch.type === "changed"
-              ? 0xffcd6b
-              : settings.highlight === batch.state.name
-                ? 0xc4d8ff
-                : 0xffffff;
-      const material = new THREE.MeshLambertMaterial({
-        map:
-          geometry.userData.fallback || batch.type
-            ? null
-            : this.resources.texture,
-        vertexColors: !batch.type,
-        color,
-        side: THREE.DoubleSide,
-        alphaTest: 0.1,
-        transparent: isGlass || dim || batch.type === "removed",
-        opacity: dim
-          ? 0.12
-          : batch.type === "removed"
-            ? 0.45
-            : isGlass
-              ? 0.65
-              : 1,
-        depthWrite: !isGlass && !dim,
-        wireframe: settings.wireframe,
-      });
-      const mesh = new THREE.InstancedMesh(
-        geometry,
-        material,
-        batch.blocks.length,
-      );
-      mesh.userData.blocks = batch.blocks;
-      batch.blocks.forEach((b, i) => {
-        matrix.makeTranslation(...b.position);
-        mesh.setMatrixAt(i, matrix);
-      });
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.computeBoundingSphere();
+    const preview = await buildPreview(state, settings, this.resources, diff, () => token !== this.generation);
+    if (!preview || token !== this.generation) return;
+    const { rendered, renderLimitReached } = preview;
+    const styles = new Map<PreviewStyle, { material: THREE.MeshLambertMaterial; dim: boolean; showText: boolean }>();
+    let textStyles = 0, textOmitted = 0;
+    let built = 0;
+    for (const batch of preview.batches) {
+      // Yield during GPU-buffer preparation too, so a new slice can cancel the build.
+      if (built >= 24000) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (token !== this.generation) return;
+        built = 0;
+      }
+      const style = batch.style, geometry = style.geometry;
+      const indices = batch.indices.finish();
+      const offsets = new Float32Array(indices.length * 3);
+      const r = batch.region;
+      for (let i = 0; i < indices.length; i++) {
+        const index = indices[i], j = i * 3;
+        if (r) {
+          offsets[j] = r.min[0] + index % r.size[0];
+          offsets[j + 1] = r.min[1] + Math.floor(index / (r.size[0] * r.size[2]));
+          offsets[j + 2] = r.min[2] + Math.floor(index / r.size[0]) % r.size[2];
+        } else offsets.set(batch.removed![index].position, j);
+      }
+      let appearance = styles.get(style);
+      if (!appearance) {
+        const isGlass = /glass|ice|water/.test(style.state.name);
+        const dim = !!settings.highlight && style.state.name !== settings.highlight;
+        const color = style.type === "added" ? 0x72e79a : style.type === "removed" ? 0xe78578 : style.type === "changed" ? 0xffcd6b : settings.highlight === style.state.name ? 0xc4d8ff : 0xffffff;
+        const material = translatedMaterial(new THREE.MeshLambertMaterial({
+          map: geometry.userData.fallback || style.type ? null : this.resources.texture,
+          vertexColors: !style.type,
+          color,
+          side: fullyOpaque(style.state) || /^minecraft:(farmland|dirt_path|slime_block)$/.test(style.state.name)
+            ? THREE.FrontSide : THREE.DoubleSide,
+          alphaTest: 0.1,
+          transparent: isGlass || dim || style.type === "removed",
+          opacity: dim ? 0.12 : style.type === "removed" ? 0.45 : isGlass ? 0.65 : 1,
+          depthWrite: !isGlass && !dim,
+          wireframe: settings.wireframe,
+        }));
+        // Transparent double-sided blocks need only one pass, not two per batch.
+        material.forceSinglePass = true;
+        const faceCount = /_sign$/.test(style.state.name)
+          ? signFaces(style.blockEntity).filter((f) => f.lines.some(Boolean)).length : 0;
+        const showText = !style.type && textStyles + faceCount <= 256;
+        if (showText) textStyles += faceCount;
+        appearance = { material, dim, showText };
+        styles.set(style, appearance);
+      }
+      const mesh = new BlockInstances(geometry, appearance.material, offsets);
+      // Capture only compact indices and the region, not a growing batch buffer.
+      const pickSource = { region: batch.region, removed: batch.removed, style };
+      mesh.userData.pick = (id: number) => pickBlock(pickSource, indices[id]);
       this.world.add(mesh);
       this.pickables.push(mesh);
-      const faceCount = /_sign$/.test(batch.state.name)
-        ? signFaces(batch.blocks[0].blockEntity).filter((f) =>
-            f.lines.some(Boolean),
-          ).length
-        : 0;
-      const showText = !batch.type && textStyles + faceCount <= 256;
-      if (showText) textStyles += faceCount;
-      else if (!batch.type) textOmitted += faceCount * batch.blocks.length;
-      if (showText)
-        for (const overlay of signOverlays(
-          batch.state,
-          batch.blocks[0].blockEntity,
-        )) {
-          const textMaterial = new THREE.MeshBasicMaterial({
-            map: overlay.texture,
-            transparent: true,
-            alphaTest: 0.1,
-            opacity: dim ? 0.12 : 1,
-            depthWrite: false,
-            wireframe: settings.wireframe,
-          });
-          const text = new THREE.InstancedMesh(
-            overlay.geometry,
-            textMaterial,
-            batch.blocks.length,
-          );
-          text.userData.blocks = batch.blocks;
+      if (!appearance.showText && !style.type)
+        textOmitted += signFaces(style.blockEntity).filter((f) => f.lines.some(Boolean)).length * indices.length;
+      if (appearance.showText)
+        for (const overlay of signOverlays(style.state, style.blockEntity)) {
+          const material = translatedMaterial(new THREE.MeshBasicMaterial({
+            map: overlay.texture, transparent: true, alphaTest: 0.1,
+            opacity: appearance.dim ? 0.12 : 1, depthWrite: false, wireframe: settings.wireframe,
+          }));
+          const text = new BlockInstances(overlay.geometry, material, mesh.offsets);
+          text.userData.pick = mesh.userData.pick;
           text.userData.signOverlay = true;
-          batch.blocks.forEach((b, i) => {
-            matrix.makeTranslation(...b.position);
-            text.setMatrixAt(i, matrix);
-          });
-          text.instanceMatrix.needsUpdate = true;
-          text.computeBoundingSphere();
           this.world.add(text);
           this.pickables.push(text);
         }
+      built += indices.length;
     }
+    this.completedSettings = settings;
+    this.resourceRevision = this.resources.revision;
     this.onStats({
       rendered,
       missing: [...this.resources.missing],
